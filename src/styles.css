@@ -1,0 +1,26 @@
+@import "tailwindcss";
+
+/**
+ * PDFLY palette, copied rather than imported: the editor is a standalone
+ * AGPL app and shares no code with the host site, only these values.
+ */
+@theme {
+	--font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+	--color-ink: #172033;
+	--color-ink-soft: #3e4c63;
+	--color-ground: #f3f5f8;
+	--color-line: #e4e9f0;
+	--color-line-strong: #d5dce6;
+	--color-primary: #ff5e1f;
+	--color-primary-hover: color-mix(in srgb, #ff5e1f 86%, black);
+	--color-primary-wash: color-mix(in srgb, #ff5e1f 12%, white);
+	--color-primary-ink: color-mix(in srgb, #ff5e1f 68%, black);
+}
+
+html,
+body {
+	margin: 0;
+	background: transparent;
+	color: var(--color-ink);
+	font-family: var(--font-sans);
+}

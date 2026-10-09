@@ -1,0 +1,31 @@
+{
+	"name": "pdfly-editor",
+	"version": "0.1.0",
+	"private": true,
+	"description": "In-browser PDF text editor built on MuPDF.js",
+	"license": "AGPL-3.0-only",
+	"type": "module",
+	"scripts": {
+		"dev": "vite",
+		"build": "vite build",
+		"preview": "vite preview",
+		"check-types": "tsc --noEmit",
+		"test": "tsx --test tests/*.test.ts"
+	},
+	"dependencies": {
+		"mupdf": "1.28.1",
+		"react": "^19.2.5",
+		"react-dom": "^19.2.5"
+	},
+	"devDependencies": {
+		"@tailwindcss/vite": "^4.2.2",
+		"@types/node": "^22.13.14",
+		"@types/react": "^19.2.14",
+		"@types/react-dom": "^19.2.3",
+		"@vitejs/plugin-react": "^6.0.1",
+		"tailwindcss": "^4.2.2",
+		"tsx": "^4.20.0",
+		"typescript": "^6",
+		"vite": "^8.0.8"
+	}
+}
