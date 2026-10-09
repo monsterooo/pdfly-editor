@@ -142,35 +142,68 @@ describe("EditorEngine.replaceLine", () => {
 	});
 });
 
-describe("EditorEngine.addText", () => {
-	test("draws a new line at the clicked baseline", () => {
-		const engine = EditorEngine.open(makePdf(INVOICE_PAGE));
-		engine.addText(0, [300, 400], "Approved");
-		const added = EditorEngine.open(engine.save())
-			.lines(0)
-			.find((l) => l.text === "Approved");
-		assert.ok(added);
-		assert.ok(Math.abs(added.origin[0] - 300) < POSITION_TOLERANCE_PT);
-		assert.ok(Math.abs(added.origin[1] - 400) < POSITION_TOLERANCE_PT);
-	});
-});
-
 describe("EditorEngine history", () => {
 	test("undo restores the original line and redo applies the edit again", () => {
 		const engine = EditorEngine.open(makePdf(INVOICE_PAGE));
 		const line = engine.lines(0).find((l) => l.text === "Invoice 2024");
 		assert.ok(line);
-		assert.deepEqual(engine.replaceLine(0, line.index, "Invoice 2025"), {
-			canUndo: true,
-			canRedo: false,
-		});
+		assert.deepEqual(
+			engine.replaceLine(0, line.index, "Invoice 2025").history,
+			{
+				canUndo: true,
+				canRedo: false,
+			},
+		);
 
-		assert.deepEqual(engine.undo(), { canUndo: false, canRedo: true });
+		assert.deepEqual(engine.undo().history, { canUndo: false, canRedo: true });
 		assert.ok(texts(engine.save()).includes("Invoice 2024"));
 
 		engine.redo();
 		assert.ok(texts(engine.save()).includes("Invoice 2025"));
 		assert.ok(!texts(engine.save()).includes("Invoice 2024"));
+	});
+});
+
+describe("EditorEngine.save", () => {
+	test("leaves undo working after a download", () => {
+		const engine = EditorEngine.open(makePdf(INVOICE_PAGE));
+		const line = engine.lines(0).find((l) => l.text === "Invoice 2024");
+		assert.ok(line);
+		engine.replaceLine(0, line.index, "  ");
+		engine.save();
+		engine.undo();
+		assert.ok(texts(engine.save()).includes("Invoice 2024"));
+	});
+});
+
+describe("EditorEngine.replaceLine with a style", () => {
+	test("writes in the chosen font, size and colour", () => {
+		const engine = EditorEngine.open(makePdf(INVOICE_PAGE));
+		const line = engine.lines(0).find((l) => l.text === "Keep this line");
+		assert.ok(line);
+		assert.deepEqual(line.style, {
+			family: "serif",
+			bold: false,
+			italic: false,
+			size: 10,
+			color: [0, 0, 0],
+		});
+
+		engine.replaceLine(0, line.index, "Styled", {
+			family: "mono",
+			bold: true,
+			italic: false,
+			size: 16,
+			color: [0, 0, 1],
+		});
+
+		const after = EditorEngine.open(engine.save())
+			.lines(0)
+			.find((l) => l.text === "Styled");
+		assert.ok(after);
+		assert.match(after.fontName, /Courier-Bold/);
+		assert.equal(after.size, 16);
+		assert.deepEqual(after.style.color, [0, 0, 1]);
 	});
 });
 

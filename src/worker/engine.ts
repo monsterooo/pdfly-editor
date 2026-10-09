@@ -5,21 +5,42 @@ import {
 	FALLBACK_FONT_NAME,
 	type FontTraits,
 	matchStandardFont,
+	textStyleFor,
 } from "../lib/font-match";
 import {
 	insetAcrossText,
 	type Matrix,
 	type Point,
+	quadToRect,
 	type Rect,
 	textMatrix,
 } from "../lib/geometry";
-import {
-	type EditorErrorCode,
-	type HistoryState,
-	NEW_TEXT_SIZE,
-	type PageSize,
-	type TextLine,
+import { standardFontName } from "../lib/item-style";
+import type {
+	EditorErrorCode,
+	EditResult,
+	HistoryState,
+	ItemPatch,
+	ItemStyle,
+	NewItem,
+	PageItem,
+	PageSize,
+	SearchHit,
+	TextLine,
+	TextStyle,
 } from "../lib/protocol";
+import {
+	createItem,
+	flattenItems,
+	ItemError,
+	itemId,
+	ourAnnotations,
+	placeItem,
+	restyleItem,
+	retextItem,
+	type TextMeasure,
+	toPageItem,
+} from "./items";
 
 const PDF_MIME = "application/pdf";
 
@@ -36,11 +57,14 @@ const VERTICAL_WMODE = 1;
  */
 const REDACT_INSET_RATIO = 0.2;
 
-/** New text boxes: plain black Helvetica, like a typewriter tool. */
-const NEW_TEXT_FONT = "Helvetica";
-const NEW_TEXT_COLOR = [0];
-/** Page space is y-down, so a horizontal line reads along +x. */
-const HORIZONTAL: Point = [1, 0];
+/** A quarter turn; pages only rotate in quarter turns. */
+const QUARTER_TURN = 90;
+const FULL_TURN = 360;
+
+/** Search stops after this many hits so a common word cannot stall the UI. */
+const MAX_SEARCH_HITS = 500;
+/** "Résumé" finds "resume" and "RESUME", like a browser's find. */
+const SEARCH_OPTIONS = "ignore-case,ignore-diacritics";
 
 /**
  * Wrapper around the page's original content. Producers may end their
@@ -68,7 +92,7 @@ export class EngineError extends Error {
 }
 
 /** A line plus the font facts only the engine needs. */
-type ScannedLine = TextLine & { traits: FontTraits };
+type ScannedLine = Omit<TextLine, "style"> & { traits: FontTraits };
 
 /**
  * Owns one open PDF and every edit to it.
@@ -105,18 +129,51 @@ export class EditorEngine {
 		return sizes;
 	}
 
-	/** PNG of one page at `scale` pixels per point, annotations included. */
-	render(pageIndex: number, scale: number): Uint8Array {
+	/**
+	 * PNG of one page at `scale` pixels per point, annotations included.
+	 * With `hideItems`, the editor's own items are left out: the UI draws
+	 * each one separately so it can move them live. Hidden-for-editing is a
+	 * runtime flag, not part of the file or the undo journal.
+	 */
+	render(pageIndex: number, scale: number, hideItems = false): Uint8Array {
 		const page = this.doc.loadPage(pageIndex);
-		const matrix = mupdf.Matrix.scale(scale, scale);
-		return page
-			.toPixmap(matrix, mupdf.ColorSpace.DeviceRGB, false, true)
+		const hidden = hideItems ? ourAnnotations(page) : [];
+		for (const annot of hidden) annot.setHiddenForEditing(true);
+		try {
+			const matrix = mupdf.Matrix.scale(scale, scale);
+			return page
+				.toPixmap(matrix, mupdf.ColorSpace.DeviceRGB, false, true)
+				.asPNG();
+		} finally {
+			for (const annot of hidden) annot.setHiddenForEditing(false);
+		}
+	}
+
+	/** Transparent PNG of one item, covering its bounds at `scale`. */
+	renderItem(pageIndex: number, id: number, scale: number): Uint8Array {
+		const annot = this.findItem(this.doc.loadPage(pageIndex), id);
+		return annot
+			.toPixmap(
+				mupdf.Matrix.scale(scale, scale),
+				mupdf.ColorSpace.DeviceRGB,
+				true,
+			)
 			.asPNG();
+	}
+
+	items(pageIndex: number): PageItem[] {
+		return ourAnnotations(this.doc.loadPage(pageIndex)).flatMap((annot) => {
+			const item = toPageItem(annot);
+			return item ? [item] : [];
+		});
 	}
 
 	lines(pageIndex: number): TextLine[] {
 		return scanLines(this.doc.loadPage(pageIndex)).map(
-			({ traits: _traits, ...line }) => line,
+			({ traits, ...line }) => ({
+				...line,
+				style: textStyleFor(traits, line.size, line.color),
+			}),
 		);
 	}
 
@@ -124,23 +181,26 @@ export class EditorEngine {
 	 * Replaces one line in place: the original glyphs are removed from the
 	 * content stream (not covered), then the new text is drawn from the same
 	 * baseline in the closest standard font, size and colour.
-	 * Blank text deletes the line.
+	 * Blank text deletes the line. `style` overrides the matched font, size
+	 * and colour.
 	 */
 	replaceLine(
 		pageIndex: number,
 		lineIndex: number,
 		text: string,
-	): HistoryState {
+		style?: TextStyle,
+	): EditResult {
 		const page = this.doc.loadPage(pageIndex);
 		const line = scanLines(page)[lineIndex];
 		if (!line?.editable) throw new EngineError("no_line");
 		refusePendingRedactions(page);
 
 		const blank = text.trim() === "";
+		const fontName = style
+			? standardFontName(style)
+			: matchStandardFont(line.traits);
 		/** Encode before touching the page so a bad character changes nothing. */
-		const encoded = blank
-			? undefined
-			: this.encode(text, matchStandardFont(line.traits));
+		const encoded = blank ? undefined : this.encode(text, fontName);
 
 		this.operation("Replace text", () => {
 			redactText(
@@ -150,58 +210,175 @@ export class EditorEngine {
 			if (encoded) {
 				this.drawRun(page, {
 					...encoded,
-					size: line.size,
-					color: line.color,
+					size: style?.size ?? line.size,
+					color: style?.color ?? line.color,
 					matrix: textMatrix(line.direction, line.origin),
 				});
 			}
 		});
-		return this.history();
+		return this.result();
 	}
 
-	/** New line of text with its baseline starting at `origin` (page space). */
-	addText(pageIndex: number, origin: Point, text: string): HistoryState {
-		if (text.trim() === "") return this.history();
+	/** Adds a text box, shape, mark-up, drawing or image. */
+	addItem(
+		pageIndex: number,
+		item: NewItem,
+		style: ItemStyle,
+	): EditResult & { id: number } {
 		const page = this.doc.loadPage(pageIndex);
-		const encoded = this.encode(text, NEW_TEXT_FONT);
-		this.operation("Add text", () => {
-			this.drawRun(page, {
-				...encoded,
-				size: NEW_TEXT_SIZE,
-				color: NEW_TEXT_COLOR,
-				matrix: textMatrix(HORIZONTAL, origin),
-			});
+		let id = 0;
+		this.operation(`Add ${item.kind}`, () => {
+			id = itemId(
+				this.guardItem(() =>
+					createItem(this.doc, page, item, style, this.measure),
+				),
+			);
 		});
-		return this.history();
+		return { ...this.result(), id };
 	}
 
-	undo(): HistoryState {
+	/** Moves, resizes, restyles or retypes an item. Blank text deletes a text box. */
+	updateItem(pageIndex: number, id: number, patch: ItemPatch): EditResult {
+		const page = this.doc.loadPage(pageIndex);
+		const annot = this.findItem(page, id);
+		if (patch.text !== undefined && patch.text.trim() === "") {
+			return this.deleteItem(pageIndex, id);
+		}
+		this.operation("Change item", () => {
+			if (patch.style) restyleItem(this.doc, annot, patch.style, this.measure);
+			if (patch.text !== undefined) retextItem(annot, patch.text, this.measure);
+			if (patch.bounds) placeItem(annot, patch.bounds);
+		});
+		return this.result();
+	}
+
+	deleteItem(pageIndex: number, id: number): EditResult {
+		const page = this.doc.loadPage(pageIndex);
+		const annot = this.findItem(page, id);
+		this.operation("Delete item", () => page.deleteAnnotation(annot));
+		return this.result();
+	}
+
+	/** Turns a page by a multiple of 90°, clockwise for positive degrees. */
+	rotatePage(pageIndex: number, degrees: number): EditResult {
+		const pageObject = this.doc.loadPage(pageIndex).getObject();
+		const current = pageObject.getInheritable("Rotate");
+		const from = current.isNumber() ? current.asNumber() : 0;
+		const turns = Math.round(degrees / QUARTER_TURN) * QUARTER_TURN;
+		const to = (((from + turns) % FULL_TURN) + FULL_TURN) % FULL_TURN;
+		this.operation("Rotate page", () => pageObject.put("Rotate", to));
+		return this.result();
+	}
+
+	deletePage(pageIndex: number): EditResult {
+		if (this.doc.countPages() <= 1) throw new EngineError("last_page");
+		this.operation("Delete page", () => this.doc.deletePage(pageIndex));
+		return this.result();
+	}
+
+	/** Blank page after `after`, the same size and orientation as it. */
+	insertPage(after: number): EditResult {
+		const source = this.doc.loadPage(after).getObject();
+		const box = source.getInheritable("MediaBox");
+		const mediabox: Rect = [0, 1, 2, 3].map((i) =>
+			box.get(i).asNumber(),
+		) as Rect;
+		const rotate = source.getInheritable("Rotate");
+		const rotation = (
+			rotate.isNumber() ? rotate.asNumber() : 0
+		) as mupdf.Rotate;
+		this.operation("Insert page", () => {
+			const page = this.doc.addPage(mediabox, rotation, {}, "");
+			this.doc.insertPage(after + 1, page);
+		});
+		return this.result();
+	}
+
+	/** Case-insensitive matches across the document, in page order. */
+	search(needle: string): SearchHit[] {
+		const hits: SearchHit[] = [];
+		if (needle.trim() === "") return hits;
+		for (let index = 0; index < this.doc.countPages(); index++) {
+			for (const quads of this.doc
+				.loadPage(index)
+				.search(needle, SEARCH_OPTIONS)) {
+				hits.push({ page: index, rects: quads.map(quadToRect) });
+				if (hits.length >= MAX_SEARCH_HITS) return hits;
+			}
+		}
+		return hits;
+	}
+
+	undo(): EditResult {
 		if (!this.doc.canUndo()) throw new EngineError("nothing_to_undo");
 		this.doc.undo();
-		return this.history();
+		return this.result();
 	}
 
-	redo(): HistoryState {
+	redo(): EditResult {
 		if (!this.doc.canRedo()) throw new EngineError("nothing_to_undo");
 		this.doc.redo();
-		return this.history();
+		return this.result();
 	}
 
 	history(): HistoryState {
 		return { canUndo: this.doc.canUndo(), canRedo: this.doc.canRedo() };
 	}
 
+	private result(): EditResult {
+		return { history: this.history(), pages: this.pageSizes() };
+	}
+
+	private findItem(page: mupdf.PDFPage, id: number): mupdf.PDFAnnotation {
+		const annot = ourAnnotations(page).find((a) => itemId(a) === id);
+		if (!annot) throw new EngineError("no_item");
+		return annot;
+	}
+
+	/** Item refusals become engine errors the UI can word. */
+	private guardItem<T>(run: () => T): T {
+		try {
+			return run();
+		} catch (error) {
+			if (error instanceof ItemError) throw new EngineError(error.code);
+			throw error;
+		}
+	}
+
 	/**
-	 * Full rewrite of the file. Fonts this editor embedded are whole font
-	 * programs (the CJK fallback alone is megabytes), so a copy is subset
-	 * before the final save; the open document keeps full fonts for later
-	 * edits.
+	 * Width of one line of a text box in points, using the standard font it
+	 * will be set in and the fallback font for characters that one lacks,
+	 * the same per-character fallback MuPDF's layout applies.
+	 */
+	private readonly measure: TextMeasure = (text, style) => {
+		const font = this.font(standardFontName(style));
+		const fallback = this.font(FALLBACK_FONT_NAME);
+		let width = 0;
+		for (const ch of text) {
+			const gid = font.encodeCharacter(ch);
+			width +=
+				gid !== 0
+					? font.advanceGlyph(gid)
+					: fallback.advanceGlyph(fallback.encodeCharacter(ch));
+		}
+		return width * style.size;
+	};
+
+	/**
+	 * Full rewrite of the file. Added items are flattened into the page
+	 * content of a copy, so they look the same in every viewer, while the
+	 * open document keeps them editable. Fonts this editor embedded are
+	 * whole font programs (the CJK fallback alone is megabytes), so the copy
+	 * is subset before the final save.
 	 */
 	save(): Uint8Array {
-		if (!this.embeddedFonts)
-			return ownBytes(this.doc.saveToBuffer(SAVE_OPTIONS));
+		/**
+		 * Always work on a copy: garbage collection renumbers and drops
+		 * objects, which would break the open document's undo journal.
+		 */
 		const copy = new mupdf.PDFDocument(ownBytes(this.doc.saveToBuffer("")));
-		copy.subsetFonts();
+		const flattened = flattenItems(copy);
+		if (this.embeddedFonts || flattened) copy.subsetFonts();
 		return ownBytes(copy.saveToBuffer(SAVE_OPTIONS));
 	}
 

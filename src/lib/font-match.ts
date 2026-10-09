@@ -1,3 +1,6 @@
+import { familyOfStandardFont, standardFontName, toRgb } from "./item-style";
+import type { TextStyle } from "./protocol";
+
 /** What MuPDF can tell about the font a line was set in. */
 export type FontTraits = {
 	name: string;
@@ -13,28 +16,6 @@ export type FontTraits = {
  * Greek and Cyrillic, and is subset on save so only used glyphs ship.
  */
 export const FALLBACK_FONT_NAME = "zh-Hans";
-
-/** Standard font families, by the name prefix MuPDF's builtins use. */
-const FAMILY = {
-	sans: {
-		regular: "Helvetica",
-		bold: "Helvetica-Bold",
-		italic: "Helvetica-Oblique",
-		boldItalic: "Helvetica-BoldOblique",
-	},
-	serif: {
-		regular: "Times-Roman",
-		bold: "Times-Bold",
-		italic: "Times-Italic",
-		boldItalic: "Times-BoldItalic",
-	},
-	mono: {
-		regular: "Courier",
-		bold: "Courier-Bold",
-		italic: "Courier-Oblique",
-		boldItalic: "Courier-BoldOblique",
-	},
-} as const;
 
 /** Name hints. Subset prefixes like "ABCDEF+" do not get in the way of these. */
 const BOLD_HINT = /bold|black|heavy|semibold|demi/i;
@@ -56,13 +37,30 @@ export function matchStandardFont(traits: FontTraits): string {
 	const mono = MONO_HINT.test(name) || (traits.isMono && !SANS_HINT.test(name));
 	const serif =
 		!mono && !SANS_HINT.test(name) && (SERIF_HINT.test(name) || traits.isSerif);
-	const family = mono ? FAMILY.mono : serif ? FAMILY.serif : FAMILY.sans;
-	const bold = traits.isBold || BOLD_HINT.test(name);
-	const italic = traits.isItalic || ITALIC_HINT.test(name);
-	if (bold && italic) return family.boldItalic;
-	if (bold) return family.bold;
-	if (italic) return family.italic;
-	return family.regular;
+	return standardFontName({
+		family: mono ? "mono" : serif ? "serif" : "sans",
+		bold: traits.isBold || BOLD_HINT.test(name),
+		italic: traits.isItalic || ITALIC_HINT.test(name),
+	});
+}
+
+/**
+ * The format bar's starting point for a line: the standard font it would
+ * be rewritten in, at its own size and colour.
+ */
+export function textStyleFor(
+	traits: FontTraits,
+	size: number,
+	color: readonly number[],
+): TextStyle {
+	const name = matchStandardFont(traits);
+	return {
+		family: familyOfStandardFont(name),
+		bold: /Bold/.test(name),
+		italic: /Italic|Oblique/.test(name),
+		size,
+		color: toRgb(color),
+	};
 }
 
 /** CSS stand-in for a standard font, used by the inline editor box. */

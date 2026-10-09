@@ -15,8 +15,16 @@ export function errorMessage(code: EditorErrorCode, detail?: string): string {
 			return detail
 				? `The character “${detail}” isn't supported yet.`
 				: "That text has a character that isn't supported yet.";
+		case "unsupported_image":
+			return "That image couldn't be read. Use a PNG or JPEG.";
 		case "no_line":
 			return "That line can't be edited.";
+		case "no_item":
+			return "That item is no longer on the page.";
+		case "no_text_selected":
+			return "Drag across text on the page to mark it.";
+		case "last_page":
+			return "A PDF needs at least one page.";
 		case "pending_redactions":
 			return "This page has redactions that haven't been applied. Apply them in your PDF app first.";
 		case "nothing_to_undo":

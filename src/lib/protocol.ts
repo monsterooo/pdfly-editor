@@ -1,10 +1,20 @@
 import type { Point, Rect } from "./geometry";
 
-/**
- * Size of text added with "Add text", in points. Shared here so the UI can
- * size its input box without importing the engine (and MuPDF with it).
- */
-export const NEW_TEXT_SIZE = 12;
+/** Standard font classes the editor writes with. */
+export type FontFamily = "sans" | "serif" | "mono";
+
+/** Colour as RGB components, 0–1, the way MuPDF takes them. */
+export type Rgb = [number, number, number];
+
+/** How a run of text looks: used for edited lines and added text boxes. */
+export type TextStyle = {
+	family: FontFamily;
+	bold: boolean;
+	italic: boolean;
+	/** Points. */
+	size: number;
+	color: Rgb;
+};
 
 /** One line of text MuPDF found on a page, in page space (points, y-down). */
 export type TextLine = {
@@ -19,6 +29,8 @@ export type TextLine = {
 	fontName: string;
 	size: number;
 	color: number[];
+	/** Closest standard style, the starting point of the format bar. */
+	style: TextStyle;
 	/** Vertical writing is shown but not editable yet. */
 	editable: boolean;
 };
@@ -29,12 +41,80 @@ export type TextLine = {
  */
 export type PageSize = { x: number; y: number; width: number; height: number };
 
+/**
+ * Things the editor adds on top of a page. Each one is a PDF annotation
+ * while editing, so it can be selected, moved and restyled; Download
+ * flattens them into the page content.
+ */
+export type ItemKind =
+	| "text"
+	| "whiteout"
+	| "rect"
+	| "ellipse"
+	| "line"
+	| "arrow"
+	| "ink"
+	| "highlight"
+	| "underline"
+	| "strikeout"
+	| "image";
+
+/**
+ * Look of an added item. Every item carries the whole style and uses the
+ * fields that apply to its kind (see STYLE_FIELDS in item-style.ts), which
+ * keeps one shape for the UI to edit.
+ */
+export type ItemStyle = {
+	/** Text colour, stroke colour or markup colour. */
+	color: Rgb;
+	/** Interior of rectangles and ellipses; null is no fill. */
+	fill: Rgb | null;
+	/** Stroke width in points. */
+	strokeWidth: number;
+	/** 0–1. */
+	opacity: number;
+	text: TextStyle;
+};
+
+/** An added item as the UI sees it. */
+export type PageItem = {
+	/** PDF object number of the annotation: stable across moves and undo. */
+	id: number;
+	kind: ItemKind;
+	/** Visual bounds in page space, strokes included. */
+	bounds: Rect;
+	/** Text items only. */
+	text: string;
+	style: ItemStyle;
+};
+
+/** What the UI asks the engine to create. Coordinates are page space. */
+export type NewItem =
+	| { kind: "text"; at: Point; text: string }
+	| { kind: "whiteout" | "rect" | "ellipse"; rect: Rect }
+	| { kind: "line" | "arrow"; from: Point; to: Point }
+	| { kind: "ink"; strokes: Point[][] }
+	/** Marks the text between two points in reading order. */
+	| { kind: "highlight" | "underline" | "strikeout"; from: Point; to: Point }
+	/** PNG or JPEG bytes. */
+	| { kind: "image"; rect: Rect; bytes: Uint8Array };
+
+/** Changes to an existing item. `bounds` moves or resizes it. */
+export type ItemPatch = { bounds?: Rect; text?: string; style?: ItemStyle };
+
+/** A search hit: one rectangle per line the match spans. */
+export type SearchHit = { page: number; rects: Rect[] };
+
 /** Why the engine refused something. Stable codes; the UI words them. */
 export type EditorErrorCode =
 	| "not_pdf"
 	| "encrypted"
 	| "unsupported_character"
+	| "unsupported_image"
 	| "no_line"
+	| "no_item"
+	| "no_text_selected"
+	| "last_page"
 	| "pending_redactions"
 	| "nothing_to_undo"
 	| "internal";
@@ -49,13 +129,34 @@ export type HistoryState = { canUndo: boolean; canRedo: boolean };
 
 export const EMPTY_HISTORY: HistoryState = { canUndo: false, canRedo: false };
 
+/**
+ * What every change answers with. Undo and page operations can change the
+ * page list, so it always comes back with the history.
+ */
+export type EditResult = { history: HistoryState; pages: PageSize[] };
+
 /** Requests the UI sends the worker. Every one carries a reply id. */
 export type EditorRequest =
 	| { type: "open"; bytes: ArrayBuffer }
-	| { type: "render"; page: number; scale: number }
+	/** `hideItems` leaves added items out; the UI draws them itself. */
+	| { type: "render"; page: number; scale: number; hideItems: boolean }
 	| { type: "lines"; page: number }
-	| { type: "replace"; page: number; line: number; text: string }
-	| { type: "add"; page: number; origin: Point; text: string }
+	| { type: "items"; page: number }
+	| { type: "renderItem"; page: number; id: number; scale: number }
+	| {
+			type: "replace";
+			page: number;
+			line: number;
+			text: string;
+			style?: TextStyle;
+	  }
+	| { type: "addItem"; page: number; item: NewItem; style: ItemStyle }
+	| { type: "updateItem"; page: number; id: number; patch: ItemPatch }
+	| { type: "deleteItem"; page: number; id: number }
+	| { type: "rotatePage"; page: number; degrees: number }
+	| { type: "deletePage"; page: number }
+	| { type: "insertPage"; after: number }
+	| { type: "search"; needle: string }
 	| { type: "undo" }
 	| { type: "redo" }
 	| { type: "save" };
@@ -65,10 +166,18 @@ export type EditorResponseMap = {
 	open: { pages: PageSize[] };
 	render: { png: Uint8Array };
 	lines: { lines: TextLine[] };
-	replace: HistoryState;
-	add: HistoryState;
-	undo: HistoryState;
-	redo: HistoryState;
+	items: { items: PageItem[] };
+	renderItem: { png: Uint8Array };
+	replace: EditResult;
+	addItem: EditResult & { id: number };
+	updateItem: EditResult;
+	deleteItem: EditResult;
+	rotatePage: EditResult;
+	deletePage: EditResult;
+	insertPage: EditResult;
+	search: { hits: SearchHit[] };
+	undo: EditResult;
+	redo: EditResult;
 	save: { bytes: Uint8Array };
 };
 

@@ -77,3 +77,37 @@ export function contentStreams(bytes: Uint8Array, pageIndex = 0): string[] {
 	else read(contents);
 	return parts;
 }
+
+/** Several one-line pages, "Page 1" … "Page n", for page operations. */
+export function makePagesPdf(count: number): Uint8Array {
+	const doc = new mupdf.PDFDocument();
+	const resources = doc.addObject({
+		Font: { F1: doc.addSimpleFont(new mupdf.Font("Helvetica")) },
+	});
+	for (let index = 1; index <= count; index++) {
+		const content = `BT /F1 12 Tf 72 700 Td (Page ${index}) Tj ET`;
+		doc.insertPage(-1, doc.addPage(LETTER, 0, resources, content));
+	}
+	return doc.saveToBuffer("").asUint8Array().slice();
+}
+
+/** A small solid-colour PNG, for image items. */
+export function makePng(width = 8, height = 4): Uint8Array {
+	const GRAY = 128;
+	const pixmap = new mupdf.Pixmap(
+		mupdf.ColorSpace.DeviceRGB,
+		[0, 0, width, height],
+		false,
+	);
+	pixmap.clear(GRAY);
+	return pixmap.asPNG().slice();
+}
+
+/** Annotation subtypes left in a saved file, in page order. */
+export function annotationTypes(bytes: Uint8Array, pageIndex = 0): string[] {
+	const doc = new mupdf.PDFDocument(bytes);
+	return doc
+		.loadPage(pageIndex)
+		.getAnnotations()
+		.map((annot) => annot.getType());
+}

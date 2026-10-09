@@ -36,21 +36,55 @@ async function handle(
 			engine = EditorEngine.open(new Uint8Array(request.bytes));
 			return [{ pages: engine.pageSizes() }, []];
 		case "render": {
-			const png = requireEngine().render(request.page, request.scale);
+			const png = requireEngine().render(
+				request.page,
+				request.scale,
+				request.hideItems,
+			);
+			return [{ png }, [png.buffer]];
+		}
+		case "renderItem": {
+			const png = requireEngine().renderItem(
+				request.page,
+				request.id,
+				request.scale,
+			);
 			return [{ png }, [png.buffer]];
 		}
 		case "lines":
 			return [{ lines: requireEngine().lines(request.page) }, []];
+		case "items":
+			return [{ items: requireEngine().items(request.page) }, []];
 		case "replace":
 			return [
-				requireEngine().replaceLine(request.page, request.line, request.text),
+				requireEngine().replaceLine(
+					request.page,
+					request.line,
+					request.text,
+					request.style,
+				),
 				[],
 			];
-		case "add":
+		case "addItem":
 			return [
-				requireEngine().addText(request.page, request.origin, request.text),
+				requireEngine().addItem(request.page, request.item, request.style),
 				[],
 			];
+		case "updateItem":
+			return [
+				requireEngine().updateItem(request.page, request.id, request.patch),
+				[],
+			];
+		case "deleteItem":
+			return [requireEngine().deleteItem(request.page, request.id), []];
+		case "rotatePage":
+			return [requireEngine().rotatePage(request.page, request.degrees), []];
+		case "deletePage":
+			return [requireEngine().deletePage(request.page), []];
+		case "insertPage":
+			return [requireEngine().insertPage(request.after), []];
+		case "search":
+			return [{ hits: requireEngine().search(request.needle) }, []];
 		case "undo":
 			return [requireEngine().undo(), []];
 		case "redo":
