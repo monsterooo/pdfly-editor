@@ -81,6 +81,16 @@ async function handle(
 			return [requireEngine().rotatePage(request.page, request.degrees), []];
 		case "deletePage":
 			return [requireEngine().deletePage(request.page), []];
+		case "rotatePages":
+			return [requireEngine().rotatePages(request.pages, request.degrees), []];
+		case "deletePages":
+			return [requireEngine().deletePages(request.pages), []];
+		case "movePages":
+			return [requireEngine().movePages(request.pages, request.before), []];
+		case "extractPages": {
+			const bytes = requireEngine().extractPages(request.pages);
+			return [{ bytes }, [bytes.buffer]];
+		}
 		case "insertPage":
 			return [requireEngine().insertPage(request.after), []];
 		case "search":

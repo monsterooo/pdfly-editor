@@ -16,6 +16,12 @@ import {
 	textMatrix,
 } from "../lib/geometry";
 import { standardFontName } from "../lib/item-style";
+import {
+	isIdentity,
+	moveOrder,
+	moveStart,
+	normalizePages,
+} from "../lib/organize";
 import type {
 	EditorErrorCode,
 	EditResult,
@@ -261,19 +267,72 @@ export class EditorEngine {
 
 	/** Turns a page by a multiple of 90°, clockwise for positive degrees. */
 	rotatePage(pageIndex: number, degrees: number): EditResult {
-		const pageObject = this.doc.loadPage(pageIndex).getObject();
-		const current = pageObject.getInheritable("Rotate");
-		const from = current.isNumber() ? current.asNumber() : 0;
+		return this.rotatePages([pageIndex], degrees);
+	}
+
+	/** Turns several pages at once; one undo step brings them all back. */
+	rotatePages(indices: readonly number[], degrees: number): EditResult {
+		const pages = this.pagesOf(indices);
 		const turns = Math.round(degrees / QUARTER_TURN) * QUARTER_TURN;
-		const to = (((from + turns) % FULL_TURN) + FULL_TURN) % FULL_TURN;
-		this.operation("Rotate page", () => pageObject.put("Rotate", to));
+		this.operation("Rotate pages", () => {
+			for (const index of pages) {
+				const pageObject = this.doc.loadPage(index).getObject();
+				const current = pageObject.getInheritable("Rotate");
+				const from = current.isNumber() ? current.asNumber() : 0;
+				const to = (((from + turns) % FULL_TURN) + FULL_TURN) % FULL_TURN;
+				pageObject.put("Rotate", to);
+			}
+		});
 		return this.result();
 	}
 
 	deletePage(pageIndex: number): EditResult {
-		if (this.doc.countPages() <= 1) throw new EngineError("last_page");
-		this.operation("Delete page", () => this.doc.deletePage(pageIndex));
+		return this.deletePages([pageIndex]);
+	}
+
+	/** Deletes several pages in one undo step. At least one page must stay. */
+	deletePages(indices: readonly number[]): EditResult {
+		const pages = this.pagesOf(indices);
+		if (pages.length >= this.doc.countPages()) {
+			throw new EngineError("last_page");
+		}
+		this.operation("Delete pages", () => {
+			/** From the end, so earlier indices stay valid while deleting. */
+			for (const index of [...pages].reverse()) this.doc.deletePage(index);
+		});
 		return this.result();
+	}
+
+	/**
+	 * Moves pages, keeping their own order, so they sit before page `before`
+	 * (counted in the current order; the page count means "to the end").
+	 * The page objects themselves move, so content and rotation go along.
+	 */
+	movePages(indices: readonly number[], before: number): EditResult {
+		const pages = this.pagesOf(indices);
+		const count = this.doc.countPages();
+		const target = Math.max(0, Math.min(before, count));
+		if (isIdentity(moveOrder(count, pages, target))) return this.result();
+		const start = moveStart(pages, target);
+		this.operation("Move pages", () => {
+			const objects = pages.map((index) => this.doc.findPage(index));
+			for (const index of [...pages].reverse()) this.doc.deletePage(index);
+			objects.forEach((object, offset) =>
+				this.doc.insertPage(start + offset, object),
+			);
+		});
+		return this.result();
+	}
+
+	/**
+	 * A new PDF of only these pages, in document order, saved like Download.
+	 * The open document is left as it is.
+	 */
+	extractPages(indices: readonly number[]): Uint8Array {
+		const pages = this.pagesOf(indices);
+		const copy = new mupdf.PDFDocument(this.save());
+		copy.rearrangePages(pages);
+		return ownBytes(copy.saveToBuffer(SAVE_OPTIONS));
 	}
 
 	/** Blank page after `after`, the same size and orientation as it. */
@@ -323,6 +382,13 @@ export class EditorEngine {
 
 	history(): HistoryState {
 		return { canUndo: this.doc.canUndo(), canRedo: this.doc.canRedo() };
+	}
+
+	/** The requested pages that exist, ascending; none is a refusal. */
+	private pagesOf(indices: readonly number[]): number[] {
+		const pages = normalizePages(indices, this.doc.countPages());
+		if (pages.length === 0) throw new EngineError("no_page");
+		return pages;
 	}
 
 	private result(): EditResult {

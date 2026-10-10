@@ -13,8 +13,11 @@ import { useState } from "react";
 
 import { MAX_EDIT_MB } from "../lib/files";
 
+/** One chip under the drop target: something the app can do. */
+export type Feature = { icon: LucideIcon; label: string };
+
 /** What the editor can do, shown before a file is picked. */
-const FEATURES: { icon: LucideIcon; label: string }[] = [
+export const EDITOR_FEATURES: readonly Feature[] = [
 	{ icon: Type, label: "Edit & add text" },
 	{ icon: Signature, label: "Sign" },
 	{ icon: ImagePlus, label: "Images" },
@@ -26,6 +29,7 @@ const FEATURES: { icon: LucideIcon; label: string }[] = [
 
 type DropZoneProps = {
 	busy: boolean;
+	features: readonly Feature[];
 	onFile: (file: File) => void;
 };
 
@@ -33,7 +37,7 @@ type DropZoneProps = {
  * Drop target and file picker. The whole label is the hit area; the input
  * is visually hidden but still reachable by keyboard and screen readers.
  */
-export function DropZone({ busy, onFile }: DropZoneProps) {
+export function DropZone({ busy, features, onFile }: DropZoneProps) {
 	const [hot, setHot] = useState(false);
 
 	return (
@@ -82,7 +86,7 @@ export function DropZone({ busy, onFile }: DropZoneProps) {
 				</span>
 			</label>
 			<ul className="flex flex-wrap justify-center gap-2">
-				{FEATURES.map(({ icon: Icon, label }) => (
+				{features.map(({ icon: Icon, label }) => (
 					<li
 						key={label}
 						className="inline-flex items-center gap-1.5 rounded-full border border-line bg-white px-3 py-1 text-ink-soft text-xs"

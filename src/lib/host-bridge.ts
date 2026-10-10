@@ -9,7 +9,13 @@ export const HOST_MESSAGE_TYPE = {
 } as const;
 
 /** Funnel events the host may forward to its analytics. */
-export type EditorEventName = "edit_opened" | "edit_saved" | "edit_failed";
+export type EditorEventName =
+	| "edit_opened"
+	| "edit_saved"
+	| "edit_failed"
+	| "organize_opened"
+	| "organize_saved"
+	| "organize_failed";
 
 export type HostMessage =
 	/**

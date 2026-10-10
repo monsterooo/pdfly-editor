@@ -25,6 +25,8 @@ export function errorMessage(code: EditorErrorCode, detail?: string): string {
 			return "Drag across text on the page to mark it.";
 		case "last_page":
 			return "A PDF needs at least one page.";
+		case "no_page":
+			return "That page is no longer in the PDF.";
 		case "pending_redactions":
 			return "This page has redactions that haven't been applied. Apply them in your PDF app first.";
 		case "nothing_to_undo":

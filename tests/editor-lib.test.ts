@@ -206,6 +206,12 @@ describe("shortcuts", () => {
 		assert.equal(resolveShortcut(key("s", { meta: true }), false), "save");
 	});
 
+	test("select all with either modifier, but not while typing", () => {
+		assert.equal(resolveShortcut(key("a", { meta: true }), false), "selectAll");
+		assert.equal(resolveShortcut(key("A", { ctrl: true }), false), "selectAll");
+		assert.equal(resolveShortcut(key("a", { meta: true }), true), null);
+	});
+
 	test("typing keeps its own keys", () => {
 		assert.equal(resolveShortcut(key("z", { meta: true }), true), null);
 		assert.equal(resolveShortcut(key("Backspace"), true), null);

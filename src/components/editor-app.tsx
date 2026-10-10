@@ -8,6 +8,7 @@ import {
 	useState,
 } from "react";
 
+import { downloadPdf } from "../lib/download";
 import { EditorClient, EditorRequestError } from "../lib/editor-client";
 import { editedFileName, isPdfFile, MAX_EDIT_BYTES } from "../lib/files";
 import { type Rect, translateRect } from "../lib/geometry";
@@ -38,23 +39,19 @@ import {
 	resolveShortcut,
 	type ShortcutAction,
 } from "../lib/shortcuts";
+import { SOURCE_URL } from "../lib/source";
 import { isSticky, kindOfTool, TOOL_INFO, type Tool } from "../lib/tools";
 import { clampZoom, resolveZoom, stepZoom, type ZoomMode } from "../lib/zoom";
 import type { Placing } from "./draw-layer";
-import { DropZone } from "./drop-zone";
+import { EDITOR_FEATURES } from "./drop-zone";
 import { EditorPage } from "./editor-page";
 import { EditorHeader, EditorToolbar } from "./editor-toolbar";
 import { PageSidebar } from "./page-sidebar";
 import { SearchBar } from "./search-bar";
 import { SignatureDialog } from "./signature-dialog";
+import { StartScreen } from "./start-screen";
 import { StatusBar } from "./status-bar";
 import { IconButton } from "./ui";
-
-/**
- * Public repository with this editor's source, as the AGPL requires.
- * vite.config.ts refuses a production build without it.
- */
-const SOURCE_URL = import.meta.env.VITE_SOURCE_URL ?? "";
 
 /** Windows at least this wide open with the thumbnail sidebar shown. */
 const SIDEBAR_MIN_WINDOW_PX = 1024;
@@ -68,8 +65,6 @@ const HIT_VIEW_SHARE = 1 / 3;
 const CURRENT_PAGE_LINE = 0.35;
 /** Ctrl+wheel zoom speed: zoom factor per pixel of wheel travel. */
 const WHEEL_ZOOM_RATE = 0.0025;
-/** Give the browser a moment to start the download before revoking. */
-const REVOKE_DELAY_MS = 10_000;
 /** Page action bars are at least this wide, even over narrow pages. */
 const PAGE_HEADER_MIN_PX = 240;
 const QUARTER_TURN = 90;
@@ -317,14 +312,7 @@ export function EditorApp({ bridge }: { bridge: Bridge }) {
 		setSaving(true);
 		try {
 			const { bytes } = await current.client.request({ type: "save" });
-			const url = URL.createObjectURL(
-				new Blob([bytes as BlobPart], { type: "application/pdf" }),
-			);
-			const link = document.createElement("a");
-			link.href = url;
-			link.download = editedFileName(current.fileName);
-			link.click();
-			setTimeout(() => URL.revokeObjectURL(url), REVOKE_DELAY_MS);
+			downloadPdf(bytes, editedFileName(current.fileName));
 			bridge.send({ type: HOST_MESSAGE_TYPE.event, name: "edit_saved" });
 		} catch (error) {
 			showError(error);
@@ -580,30 +568,13 @@ export function EditorApp({ bridge }: { bridge: Bridge }) {
 
 	if (!session) {
 		return (
-			<div ref={root} className="p-4">
-				<div className="mx-auto flex max-w-2xl flex-col gap-3">
-					<DropZone busy={opening} onFile={open} />
-					{notice && (
-						<p
-							role="status"
-							className="rounded-lg bg-primary-wash px-4 py-2 text-primary-ink text-sm"
-						>
-							{notice}
-						</p>
-					)}
-					<p className="text-center text-ink-soft text-xs">
-						Editor powered by MuPDF ·{" "}
-						<a
-							href={SOURCE_URL}
-							target="_blank"
-							rel="noreferrer"
-							className="underline underline-offset-2 hover:text-ink"
-						>
-							Source code (AGPL-3.0)
-						</a>
-					</p>
-				</div>
-			</div>
+			<StartScreen
+				rootRef={root}
+				busy={opening}
+				notice={notice}
+				features={EDITOR_FEATURES}
+				onFile={open}
+			/>
 		);
 	}
 

@@ -115,6 +115,7 @@ export type EditorErrorCode =
 	| "no_item"
 	| "no_text_selected"
 	| "last_page"
+	| "no_page"
 	| "pending_redactions"
 	| "nothing_to_undo"
 	| "internal";
@@ -155,6 +156,11 @@ export type EditorRequest =
 	| { type: "deleteItem"; page: number; id: number }
 	| { type: "rotatePage"; page: number; degrees: number }
 	| { type: "deletePage"; page: number }
+	| { type: "rotatePages"; pages: number[]; degrees: number }
+	| { type: "deletePages"; pages: number[] }
+	/** `before` counts in the current order; the page count means the end. */
+	| { type: "movePages"; pages: number[]; before: number }
+	| { type: "extractPages"; pages: number[] }
 	| { type: "insertPage"; after: number }
 	| { type: "search"; needle: string }
 	| { type: "undo" }
@@ -174,6 +180,10 @@ export type EditorResponseMap = {
 	deleteItem: EditResult;
 	rotatePage: EditResult;
 	deletePage: EditResult;
+	rotatePages: EditResult;
+	deletePages: EditResult;
+	movePages: EditResult;
+	extractPages: { bytes: Uint8Array };
 	insertPage: EditResult;
 	search: { hits: SearchHit[] };
 	undo: EditResult;

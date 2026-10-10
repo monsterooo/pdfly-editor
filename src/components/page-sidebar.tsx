@@ -74,24 +74,31 @@ export function PageSidebar({
 	);
 }
 
-function Thumbnail({
+/**
+ * One page drawn small. Renders only when near the viewport, and again
+ * when its render key or size changes. Also used by the organizer grid.
+ */
+export function Thumbnail({
 	client,
 	index,
 	size,
 	renderKey,
 	active,
+	width = THUMB_WIDTH_PX,
 }: {
 	client: EditorClient;
 	index: number;
 	size: PageSize;
 	renderKey: string;
 	active: boolean;
+	/** CSS pixels; the height follows the page's shape. */
+	width?: number;
 }) {
 	const box = useRef<HTMLSpanElement>(null);
 	const [visible, setVisible] = useState(false);
 	const [image, setImage] = useState<string | null>(null);
 	const renderedKey = useRef<string | null>(null);
-	const height = (size.height / size.width) * THUMB_WIDTH_PX;
+	const height = (size.height / size.width) * width;
 
 	useEffect(() => {
 		const node = box.current;
@@ -105,10 +112,10 @@ function Thumbnail({
 	}, []);
 
 	useEffect(() => {
-		const key = `${renderKey}:${size.width}x${size.height}`;
+		const key = `${renderKey}:${size.width}x${size.height}@${width}`;
 		if (!visible || renderedKey.current === key) return;
 		let cancelled = false;
-		const scale = (THUMB_WIDTH_PX / size.width) * THUMB_PIXEL_RATIO;
+		const scale = (width / size.width) * THUMB_PIXEL_RATIO;
 		client
 			.request({ type: "render", page: index, scale, hideItems: false })
 			.then(({ png }) => {
@@ -127,7 +134,7 @@ function Thumbnail({
 		return () => {
 			cancelled = true;
 		};
-	}, [client, index, size, renderKey, visible]);
+	}, [client, index, size, renderKey, visible, width]);
 
 	useEffect(
 		() => () => {
@@ -144,7 +151,7 @@ function Thumbnail({
 					? "ring-2 ring-primary ring-offset-2"
 					: "ring-1 ring-line group-hover:ring-line-strong group-focus-visible:ring-2 group-focus-visible:ring-primary"
 			}`}
-			style={{ width: THUMB_WIDTH_PX, height }}
+			style={{ width, height }}
 		>
 			{image && (
 				<img src={image} alt="" className="block size-full" draggable={false} />

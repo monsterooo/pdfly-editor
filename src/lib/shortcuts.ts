@@ -12,6 +12,7 @@ export type ShortcutAction =
 	| "zoomOut"
 	| "zoomFit"
 	| "delete"
+	| "selectAll"
 	| "escape"
 	| "nudgeLeft"
 	| "nudgeRight"
@@ -55,6 +56,7 @@ export function resolveShortcut(
 		if (key === "=" || key === "+") return "zoomIn";
 		if (key === "-") return "zoomOut";
 		if (key === "0") return "zoomFit";
+		if (key === "a") return "selectAll";
 		return null;
 	}
 	if (typing || event.altKey) return null;

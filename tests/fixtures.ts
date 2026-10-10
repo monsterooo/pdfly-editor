@@ -111,3 +111,24 @@ export function annotationTypes(bytes: Uint8Array, pageIndex = 0): string[] {
 		.getAnnotations()
 		.map((annot) => annot.getType());
 }
+
+/**
+ * Blank PDF with one page per width, so tests can tell pages apart by
+ * width after moving, deleting or extracting them.
+ */
+export function makePages(widths: readonly number[]): Uint8Array {
+	const doc = new mupdf.PDFDocument();
+	for (const width of widths) {
+		doc.insertPage(-1, doc.addPage([0, 0, width, LETTER[3]], 0, {}, ""));
+	}
+	return doc.saveToBuffer("").asUint8Array().slice();
+}
+
+/** Page widths of saved bytes, in page order. */
+export function pageWidths(bytes: Uint8Array): number[] {
+	const doc = mupdf.Document.openDocument(bytes, "application/pdf");
+	return Array.from({ length: doc.countPages() }, (_, index) => {
+		const [x0, , x1] = doc.loadPage(index).getBounds();
+		return x1 - x0;
+	});
+}
