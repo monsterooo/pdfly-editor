@@ -132,3 +132,113 @@ export function pageWidths(bytes: Uint8Array): number[] {
 		return x1 - x0;
 	});
 }
+
+/** Widget annotation flag that makes it print (/F 4). */
+const PRINT_FLAG = 4;
+/** /Ff bits: read-only, radio (with no-toggle-to-off), combo box. */
+const FF_READ_ONLY = 1;
+const FF_RADIO = 49152;
+const FF_COMBO = 131072;
+
+/**
+ * One-page AcroForm built with MuPDF: a text field "name" (value "Jane"),
+ * a checkbox "agree", a radio group "size" with buttons S and L, a combo
+ * box "color" (Red/Green, export values r/g), a read-only text field "id"
+ * and a label line "Name:" in the page content.
+ */
+export function makeFormPdf(): Uint8Array {
+	const doc = new mupdf.PDFDocument();
+	const resources = doc.addObject({
+		Font: { F1: doc.addSimpleFont(new mupdf.Font("Helvetica-Bold")) },
+	});
+	doc.insertPage(
+		-1,
+		doc.addPage(LETTER, 0, resources, "BT /F1 12 Tf 72 720 Td (Name:) Tj ET"),
+	);
+	const page = doc.findPage(0);
+	const da = doc.newString("/Helv 12 Tf 0 g");
+	const box = (on: string) => ({
+		N: {
+			[on]: doc.addStream("0 g 0 0 14 14 re f", { BBox: [0, 0, 14, 14] }),
+			Off: doc.addStream("", { BBox: [0, 0, 14, 14] }),
+		},
+	});
+	const widget = (fields: Record<string, unknown>) =>
+		doc.addObject({
+			Type: "Annot",
+			Subtype: "Widget",
+			P: page,
+			F: PRINT_FLAG,
+			...fields,
+		});
+
+	const name = widget({
+		FT: "Tx",
+		T: doc.newString("name"),
+		TU: doc.newString("Full name"),
+		Rect: [120, 710, 320, 730],
+		DA: da,
+		V: doc.newString("Jane"),
+	});
+	const agree = widget({
+		FT: "Btn",
+		T: doc.newString("agree"),
+		Rect: [72, 680, 86, 694],
+		V: doc.newName("Off"),
+		AS: doc.newName("Off"),
+		AP: box("Yes"),
+	});
+	const size = doc.addObject({
+		FT: "Btn",
+		Ff: FF_RADIO,
+		T: doc.newString("size"),
+		V: doc.newName("Off"),
+		Kids: [],
+	});
+	const sizes = ["S", "L"].map((state, i) => {
+		const kid = widget({
+			Parent: size,
+			Rect: [72 + i * 30, 650, 86 + i * 30, 664],
+			AS: doc.newName("Off"),
+			AP: box(state),
+		});
+		size.get("Kids").push(kid);
+		return kid;
+	});
+	const color = widget({
+		FT: "Ch",
+		Ff: FF_COMBO,
+		T: doc.newString("color"),
+		Rect: [120, 620, 250, 640],
+		Opt: [
+			[doc.newString("r"), doc.newString("Red")],
+			[doc.newString("g"), doc.newString("Green")],
+		],
+		V: doc.newString("r"),
+		DA: da,
+	});
+	const id = widget({
+		FT: "Tx",
+		Ff: FF_READ_ONLY,
+		T: doc.newString("id"),
+		Rect: [120, 580, 320, 600],
+		DA: da,
+		V: doc.newString("X-1"),
+	});
+	page.put("Annots", [name, agree, ...sizes, color, id]);
+	doc
+		.getTrailer()
+		.get("Root")
+		.put(
+			"AcroForm",
+			doc.addObject({
+				Fields: [name, agree, size, color, id],
+				DA: da,
+				DR: {
+					Font: { Helv: doc.addSimpleFont(new mupdf.Font("Helvetica")) },
+				},
+				NeedAppearances: true,
+			}),
+		);
+	return doc.saveToBuffer("").asUint8Array().slice();
+}

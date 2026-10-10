@@ -25,6 +25,8 @@ import {
 import type {
 	EditorErrorCode,
 	EditResult,
+	FormField,
+	FormSummary,
 	HistoryState,
 	ItemPatch,
 	ItemStyle,
@@ -35,6 +37,7 @@ import type {
 	TextLine,
 	TextStyle,
 } from "../lib/protocol";
+import { fieldKind, findWidget, pageFields } from "./fields";
 import {
 	createItem,
 	flattenItems,
@@ -172,6 +175,68 @@ export class EditorEngine {
 			const item = toPageItem(annot);
 			return item ? [item] : [];
 		});
+	}
+
+	fields(pageIndex: number): FormField[] {
+		return pageFields(this.doc.loadPage(pageIndex));
+	}
+
+	/** How many fillable fields the document has, and whether it is XFA only. */
+	formSummary(): FormSummary {
+		let fields = 0;
+		for (let index = 0; index < this.doc.countPages(); index++) {
+			fields += this.fields(index).length;
+		}
+		/** get() on a null object throws, so stop at a missing /AcroForm. */
+		const acroForm = this.doc.getTrailer().get("Root").get("AcroForm");
+		const xfaOnly =
+			fields === 0 && acroForm.isDictionary() && !acroForm.get("XFA").isNull();
+		return { fields, xfaOnly };
+	}
+
+	/**
+	 * Fills a text field, or picks a choice in a combo or list box. MuPDF
+	 * regenerates the field's appearance, and the field stays a field, so
+	 * the downloaded PDF can still be filled in other apps. Text over the
+	 * field's length limit is cut to it, as a PDF viewer would.
+	 */
+	setField(pageIndex: number, id: number, value: string): EditResult {
+		const widget = this.findField(this.doc.loadPage(pageIndex), id);
+		const kind = fieldKind(widget);
+		this.operation("Fill field", () => {
+			if (kind === "text") {
+				const limit = widget.getMaxLen();
+				widget.setTextValue(
+					limit > 0 ? [...value].slice(0, limit).join("") : value,
+				);
+			} else if (kind === "combo" || kind === "list") {
+				if (!widget.getOptions(true).includes(value)) {
+					throw new EngineError("invalid_option");
+				}
+				widget.setChoiceValue(value);
+			} else {
+				throw new EngineError("no_field");
+			}
+			widget.update();
+		});
+		return this.result();
+	}
+
+	/**
+	 * Ticks or unticks a checkbox, or picks a radio button. MuPDF switches
+	 * the other buttons of a radio group off.
+	 */
+	toggleField(pageIndex: number, id: number): EditResult {
+		const widget = this.findField(this.doc.loadPage(pageIndex), id);
+		const kind = fieldKind(widget);
+		if (kind !== "checkbox" && kind !== "radio") {
+			throw new EngineError("no_field");
+		}
+		this.operation("Toggle field", () => {
+			widget.toggle();
+			widget.update();
+		});
+		return this.result();
 	}
 
 	lines(pageIndex: number): TextLine[] {
@@ -399,6 +464,14 @@ export class EditorEngine {
 		const annot = ourAnnotations(page).find((a) => itemId(a) === id);
 		if (!annot) throw new EngineError("no_item");
 		return annot;
+	}
+
+	/** A fillable, writable widget, or a refusal. */
+	private findField(page: mupdf.PDFPage, id: number): mupdf.PDFWidget {
+		const widget = findWidget(page, id);
+		if (!widget || !fieldKind(widget)) throw new EngineError("no_field");
+		if (widget.isReadOnly()) throw new EngineError("field_read_only");
+		return widget;
 	}
 
 	/** Item refusals become engine errors the UI can word. */

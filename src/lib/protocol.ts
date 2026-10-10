@@ -102,6 +102,45 @@ export type NewItem =
 /** Changes to an existing item. `bounds` moves or resizes it. */
 export type ItemPatch = { bounds?: Rect; text?: string; style?: ItemStyle };
 
+/**
+ * Form fields the editor can fill. Push buttons and signature fields are
+ * left out: there is nothing to type into or tick.
+ */
+export type FormFieldKind = "text" | "checkbox" | "radio" | "combo" | "list";
+
+/**
+ * One widget of an AcroForm field, in page space. Radio groups list one
+ * widget per button; they share `name` and `value`, `checked` tells them apart.
+ */
+export type FormField = {
+	/** PDF object number of the widget: stable across fills and undo. */
+	id: number;
+	kind: FormFieldKind;
+	/** Fully qualified field name. */
+	name: string;
+	/** Tooltip (/TU) when the author gave one, otherwise the name. */
+	label: string;
+	bounds: Rect;
+	value: string;
+	/** Checkboxes and radio buttons: whether this widget is on. */
+	checked: boolean;
+	/**
+	 * Combo and list boxes: each choice's export value (what is stored) and
+	 * label (what is shown). They are the same unless the author paired them.
+	 */
+	options: { value: string; label: string }[];
+	multiline: boolean;
+	/** Text fields; 0 is no limit. */
+	maxLength: number;
+	readOnly: boolean;
+};
+
+/**
+ * What kind of form a document has. XFA-only forms keep their fields in XML
+ * MuPDF does not lay out, so they show no fillable widgets.
+ */
+export type FormSummary = { fields: number; xfaOnly: boolean };
+
 /** A search hit: one rectangle per line the match spans. */
 export type SearchHit = { page: number; rects: Rect[] };
 
@@ -117,6 +156,9 @@ export type EditorErrorCode =
 	| "last_page"
 	| "no_page"
 	| "pending_redactions"
+	| "no_field"
+	| "field_read_only"
+	| "invalid_option"
 	| "nothing_to_undo"
 	| "internal";
 
@@ -143,6 +185,11 @@ export type EditorRequest =
 	| { type: "render"; page: number; scale: number; hideItems: boolean }
 	| { type: "lines"; page: number }
 	| { type: "items"; page: number }
+	| { type: "fields"; page: number }
+	/** Text, combo and list fields. */
+	| { type: "setField"; page: number; id: number; value: string }
+	/** Checkboxes and radio buttons. */
+	| { type: "toggleField"; page: number; id: number }
 	| { type: "renderItem"; page: number; id: number; scale: number }
 	| {
 			type: "replace";
@@ -169,10 +216,13 @@ export type EditorRequest =
 
 /** What each request resolves to. */
 export type EditorResponseMap = {
-	open: { pages: PageSize[] };
+	open: { pages: PageSize[]; form: FormSummary };
 	render: { png: Uint8Array };
 	lines: { lines: TextLine[] };
 	items: { items: PageItem[] };
+	fields: { fields: FormField[] };
+	setField: EditResult;
+	toggleField: EditResult;
 	renderItem: { png: Uint8Array };
 	replace: EditResult;
 	addItem: EditResult & { id: number };

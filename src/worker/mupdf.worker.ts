@@ -34,7 +34,7 @@ async function handle(
 	switch (request.type) {
 		case "open":
 			engine = EditorEngine.open(new Uint8Array(request.bytes));
-			return [{ pages: engine.pageSizes() }, []];
+			return [{ pages: engine.pageSizes(), form: engine.formSummary() }, []];
 		case "render": {
 			const png = requireEngine().render(
 				request.page,
@@ -55,6 +55,15 @@ async function handle(
 			return [{ lines: requireEngine().lines(request.page) }, []];
 		case "items":
 			return [{ items: requireEngine().items(request.page) }, []];
+		case "fields":
+			return [{ fields: requireEngine().fields(request.page) }, []];
+		case "setField":
+			return [
+				requireEngine().setField(request.page, request.id, request.value),
+				[],
+			];
+		case "toggleField":
+			return [requireEngine().toggleField(request.page, request.id), []];
 		case "replace":
 			return [
 				requireEngine().replaceLine(

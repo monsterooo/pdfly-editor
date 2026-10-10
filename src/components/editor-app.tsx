@@ -17,6 +17,7 @@ import { type Picture, readPicture } from "../lib/images";
 import { DEFAULT_ITEM_STYLE, MARKUP_KINDS } from "../lib/item-style";
 import {
 	errorMessage,
+	formMessage,
 	NOT_PDF_MESSAGE,
 	TOO_LARGE_MESSAGE,
 } from "../lib/messages";
@@ -244,10 +245,14 @@ export function EditorApp({ bridge }: { bridge: Bridge }) {
 		const client = new EditorClient(worker);
 		try {
 			const bytes = await file.arrayBuffer();
-			const { pages } = await client.request({ type: "open", bytes }, [bytes]);
+			const { pages, form } = await client.request({ type: "open", bytes }, [
+				bytes,
+			]);
 			resetWorkspace();
 			setVersions(pages.map(() => 0));
 			setSession({ client, fileName: file.name, pages });
+			const formNotice = formMessage(form);
+			if (formNotice) setNotice(formNotice);
 			bridge.send({ type: HOST_MESSAGE_TYPE.event, name: "edit_opened" });
 		} catch (error) {
 			client.terminate();
@@ -707,6 +712,29 @@ export function EditorApp({ bridge }: { bridge: Bridge }) {
 														line,
 														text,
 														style,
+													}),
+												index,
+											)
+										}
+										onSetField={(id, value) =>
+											change(
+												() =>
+													session.client.request({
+														type: "setField",
+														page: index,
+														id,
+														value,
+													}),
+												index,
+											)
+										}
+										onToggleField={(id) =>
+											change(
+												() =>
+													session.client.request({
+														type: "toggleField",
+														page: index,
+														id,
 													}),
 												index,
 											)

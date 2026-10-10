@@ -4,6 +4,7 @@ import type { EditorClient } from "../lib/editor-client";
 import { type Point, pageRectToBox, type Rect } from "../lib/geometry";
 import { TEXT_LINE_HEIGHT } from "../lib/item-style";
 import type {
+	FormField,
 	ItemPatch,
 	ItemStyle,
 	NewItem,
@@ -15,6 +16,7 @@ import type {
 import type { Tool } from "../lib/tools";
 import { renderScale } from "../lib/zoom";
 import { DrawLayer, type Placing } from "./draw-layer";
+import { FieldLayer } from "./field-layer";
 import { ItemLayer } from "./item-layer";
 import { TextEditor } from "./text-editor";
 
@@ -35,6 +37,7 @@ type Rendered = {
 	lines: TextLine[];
 	items: PageItem[];
 	itemImages: Map<number, string>;
+	fields: FormField[];
 };
 
 type EditorPageProps = {
@@ -56,6 +59,8 @@ type EditorPageProps = {
 	onUpdateItem: (id: number, patch: ItemPatch) => void;
 	onDeleteItem: (id: number) => void;
 	onReplace: (line: number, text: string, style?: TextStyle) => void;
+	onSetField: (id: number, value: string) => void;
+	onToggleField: (id: number) => void;
 	onError: (error: unknown) => void;
 };
 
@@ -94,6 +99,8 @@ export function EditorPage({
 	onUpdateItem,
 	onDeleteItem,
 	onReplace,
+	onSetField,
+	onToggleField,
 	onError,
 }: EditorPageProps) {
 	const frame = useRef<HTMLDivElement>(null);
@@ -119,10 +126,11 @@ export function EditorPage({
 		let cancelled = false;
 		const scale = renderScale(zoom, size, window.devicePixelRatio);
 		(async () => {
-			const [page, text, list] = await Promise.all([
+			const [page, text, list, form] = await Promise.all([
 				client.request({ type: "render", page: index, scale, hideItems: true }),
 				client.request({ type: "lines", page: index }),
 				client.request({ type: "items", page: index }),
+				client.request({ type: "fields", page: index }),
 			]);
 			const pngs = await Promise.all(
 				list.items.map((item) =>
@@ -143,6 +151,7 @@ export function EditorPage({
 				itemImages: new Map(
 					list.items.map((item, i) => [item.id, pngUrl(pngs[i].png)]),
 				),
+				fields: form.fields,
 			};
 			revokeAll(latest.current);
 			latest.current = next;
@@ -244,6 +253,18 @@ export function EditorPage({
 						/>
 					);
 				})}
+
+			{/** Above the text lines, so a field's own text fills the field. */}
+			{rendered && (
+				<FieldLayer
+					fields={rendered.fields}
+					zoom={zoom}
+					origin={origin}
+					interactive={selecting}
+					onSetValue={(field, value) => onSetField(field.id, value)}
+					onToggle={(field) => onToggleField(field.id)}
+				/>
+			)}
 
 			{rendered && (
 				<ItemLayer
@@ -347,11 +368,13 @@ export function EditorPage({
 				/>
 			)}
 
-			{rendered?.lines.length === 0 && selecting && (
-				<p className="pointer-events-none absolute top-3 left-3 rounded-md bg-ink/80 px-2.5 py-1 text-white text-xs">
-					No editable text on this page. It may be a scanned image.
-				</p>
-			)}
+			{rendered?.lines.length === 0 &&
+				rendered.fields.length === 0 &&
+				selecting && (
+					<p className="pointer-events-none absolute top-3 left-3 rounded-md bg-ink/80 px-2.5 py-1 text-white text-xs">
+						No editable text on this page. It may be a scanned image.
+					</p>
+				)}
 		</div>
 	);
 }

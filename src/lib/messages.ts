@@ -1,5 +1,5 @@
 import { MAX_EDIT_MB } from "./files";
-import type { EditorErrorCode } from "./protocol";
+import type { EditorErrorCode, FormSummary } from "./protocol";
 
 export const NOT_PDF_MESSAGE = "Choose a PDF file.";
 export const TOO_LARGE_MESSAGE = `This PDF is over ${MAX_EDIT_MB} MB. Choose a smaller file.`;
@@ -29,9 +29,25 @@ export function errorMessage(code: EditorErrorCode, detail?: string): string {
 			return "That page is no longer in the PDF.";
 		case "pending_redactions":
 			return "This page has redactions that haven't been applied. Apply them in your PDF app first.";
+		case "no_field":
+			return "That form field is no longer on the page.";
+		case "field_read_only":
+			return "That form field is read-only.";
+		case "invalid_option":
+			return "Pick one of the field's choices.";
 		case "nothing_to_undo":
 			return "Nothing to undo.";
 		case "internal":
 			return "Something went wrong. Reload the page and try again.";
 	}
+}
+
+/** What to tell a visitor about the form in the PDF they opened, if anything. */
+export function formMessage(form: FormSummary): string | null {
+	if (form.xfaOnly) {
+		return "This PDF uses an XFA form, which can't be filled here. Text and pages can still be edited.";
+	}
+	if (form.fields === 0) return null;
+	const noun = form.fields === 1 ? "form field" : "form fields";
+	return `This PDF has ${form.fields} ${noun}. Click a field to fill it in.`;
 }

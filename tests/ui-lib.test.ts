@@ -13,7 +13,7 @@ import {
 	HOST_MESSAGE_TYPE,
 	parseOrigins,
 } from "../src/lib/host-bridge";
-import { errorMessage } from "../src/lib/messages";
+import { errorMessage, formMessage } from "../src/lib/messages";
 import type { EditorReply, EditorRequestEnvelope } from "../src/lib/protocol";
 
 describe("host bridge", () => {
@@ -148,5 +148,26 @@ describe("css font and colour", () => {
 		assert.equal(cssColor([0.5]), "rgb(128 128 128)");
 		assert.equal(cssColor([0.8, 0, 0]), "rgb(204 0 0)");
 		assert.equal(cssColor([0, 0, 0, 1]), "rgb(0 0 0)");
+	});
+});
+
+describe("formMessage", () => {
+	test("says nothing for a PDF without a form", () => {
+		assert.equal(formMessage({ fields: 0, xfaOnly: false }), null);
+	});
+
+	test("counts fillable fields", () => {
+		assert.match(
+			formMessage({ fields: 1, xfaOnly: false }) ?? "",
+			/1 form field\./,
+		);
+		assert.match(
+			formMessage({ fields: 3, xfaOnly: false }) ?? "",
+			/3 form fields\./,
+		);
+	});
+
+	test("explains that XFA forms can't be filled", () => {
+		assert.match(formMessage({ fields: 0, xfaOnly: true }) ?? "", /XFA/);
 	});
 });
